@@ -2,6 +2,7 @@ from __future__ import unicode_literals
 from __future__ import absolute_import
 
 from future import standard_library
+
 standard_library.install_aliases()
 from builtins import range
 from builtins import object
@@ -14,7 +15,6 @@ from re import match, findall
 
 
 class GoogleResult(object):
-
     """Represents a google search result."""
 
     def __init__(self):
@@ -26,9 +26,9 @@ class GoogleResult(object):
         self.cached = None  # Cached version link of page
         self.page = None  # Results page this one was on
         self.index = None  # What index on this page it was on
-        self.number_of_results = None # The total number of results the query returned
-        self.is_pdf = None # This boolean is true if google thinks this result leads to a PDF file
-        
+        self.number_of_results = None  # The total number of results the query returned
+        self.is_pdf = None  # This boolean is true if google thinks this result leads to a PDF file
+
     def __repr__(self):
         name = self._limit_str_size(self.name, 55)
         description = self._limit_str_size(self.description, 49)
@@ -52,27 +52,37 @@ class GoogleResult(object):
 
 
 # PUBLIC
-def search(query, pages=1, lang='en', area='com', ncr=False, void=True, time_period=False, sort_by_date=False, first_page=0):
+def search(query, pages=1, lang='en', area='com', ncr=False, void=True, time_period=False, sort_by_date=False,
+           first_page=0):
     """Returns a list of GoogleResult.
-
     Args:
         query: String to search in google.
         pages: Number of pages where results must be taken.
         area : Area of google homepages.
         first_page : First page.
-
     TODO: add support to get the google results.
     Returns:
         A GoogleResult object."""
 
     results = []
     for i in range(first_page, first_page + pages):
-        url = _get_search_url(query, i, lang=lang, area=area, ncr=ncr, time_period=time_period, sort_by_date=sort_by_date)
+        url = _get_search_url(query, i, lang=lang, area=area, ncr=ncr, time_period=time_period,
+                              sort_by_date=sort_by_date)
         html = get_html(url)
 
         if html:
             soup = BeautifulSoup(html, "html.parser")
+
             divs = soup.findAll("div", attrs={"class": "g"})
+            if len(divs) == 0:
+                divs = soup.select("#main > div")
+                if len(divs) == 1:
+                    divs = soup.findAll("div", attrs={"data-hveid": "CAsQAA"})
+                else:
+                    divs = divs[2:]
+
+            if len(divs) == 0:
+                divs = soup.select("body > div:nth-child(3) > div")[1:]
 
             results_div = soup.find("div", attrs={"id": "resultStats"})
             number_of_results = _get_number_of_results(results_div)
@@ -92,12 +102,13 @@ def search(query, pages=1, lang='en', area='com', ncr=False, void=True, time_per
                 res.cached = _get_cached(li)
                 res.number_of_results = number_of_results
                 res.is_pdf = _get_is_pdf(li)
-                
-                if void is True:
-                    if res.description is None:
-                        continue
+
+                if void is True and (res.description is None or res.link is None):
+                    continue
+
                 results.append(res)
                 j += 1
+
     return results
 
 
@@ -185,17 +196,19 @@ def _get_google_link(li):
 
 def _get_description(li):
     """Return the description of a google search.
-
     TODO: There are some text encoding problems to resolve."""
 
-    sdiv = li.find("div", attrs={"class": "IsZvec"})
-    if sdiv:
-        stspan = sdiv.find("span", attrs={"class": "aCOpRe"})
-        if stspan is not None:
-            # return stspan.text.encode("utf-8").strip()
-            return stspan.text.strip()
-    else:
-        return None
+    # div.IsZvec span.aCOpRE is an old selection which can be deleted
+    # after Google is not using it any more
+    description = li.select_one("div.BNeawe div.BNeawe")
+    if description == None:
+        description = li.select_one("div.IsZvec span.aCOpRe")
+    if description == None:
+        description = li.find("span", attrs={"class": "qXLe6d"})
+    if description == None:
+        description = li.find("div", attrs={"class": "I5aSse"})
+
+    return description.text.strip() if description != None else None
 
 
 def _get_thumb():
@@ -212,11 +225,13 @@ def _get_cached(li):
             return urllib.parse.urljoin("http://www.google.com", link)
     return None
 
+
 def _get_is_pdf(li):
     """Return if the link is marked by google as PDF"""
     sdiv = li.find("span", attrs={"class": "ZGwO7 C0kchf NaCKVc"})
     return True if sdiv else False
-    
+
+
 def _get_number_of_results(results_div):
     """Return the total number of results of the google search.
     Note that the returned value will be the same for all the GoogleResult
